@@ -5,8 +5,16 @@
     <!-- Consumo de la API de mediciones -->
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
-    <!-- Notificaciones de alertas críticas (Android 13+) -->
+    <!-- Recurso nativo 1: Notificaciones de alertas críticas (Android 13+) -->
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <!-- Recurso nativo 2: Cámara para capturar evidencia fotográfica del fotómetro en terreno -->
+    <uses-permission android:name="android.permission.CAMERA" />
+    <!-- Recurso nativo 3: Vibración háptica del dispositivo ante alertas críticas o advertencias -->
+    <uses-permission android:name="android.permission.VIBRATE" />
+
+    <uses-feature
+        android:name="android.hardware.camera"
+        android:required="false" />
 
     <application
         android:name=".CloroApplication"

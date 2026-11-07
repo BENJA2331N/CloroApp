@@ -166,6 +166,12 @@ class CloroRepository(
         val id = db.nivelCloroDao().insertar(nivel)
         if (id == -1L) throw IllegalStateException("Ya existe una medición registrada en ese instante. Inténtalo nuevamente.")
 
+        if (clasificacion.estado == EstadoCloro.CRITICO) {
+            notificador.vibrarAlertaCritica()
+        } else {
+            notificador.vibrarConfirmacion()
+        }
+
         evaluarAlerta(punto, nivel.copy(id = id), clasificacion)
         enviarPendientesSiHayConexion()
         return db.nivelCloroDao().obtenerPorId(id) ?: nivel.copy(id = id)
@@ -235,8 +241,9 @@ class CloroRepository(
     suspend fun registrarAccionCorrectiva(alertaId: Long, descripcion: String): String? {
         val usuario = _usuarioActual.value ?: return "No hay una sesión iniciada."
         if (!usuario.rol.puedeRegistrarMediciones) return "Tu perfil no permite registrar acciones correctivas."
+        val errorValidacion = com.example.cloroapp.domain.ValidadorFormularios.validarAccionCorrectiva(descripcion)
+        if (errorValidacion != null) return errorValidacion
         val texto = descripcion.trim()
-        if (texto.length < 5) return "Describe la acción realizada (mínimo 5 caracteres)."
 
         val alerta = db.alertaDao().obtenerPorId(alertaId) ?: return "La alerta no existe."
         if (alerta.estado == EstadoAlerta.CERRADA) return "La alerta ya está cerrada."
