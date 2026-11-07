@@ -1,17 +1,39 @@
 package com.example.cloroapp.ui.screen
 
+import android.Manifest
+import android.content.pm.PackageManager
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.activity.result.launch
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.animateContentSize
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Build
+import androidx.compose.material.icons.filled.CheckCircle
+import androidx.compose.material.icons.filled.Clear
+import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Share
+import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
@@ -20,23 +42,30 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.saveable.rememberSaveable
-import androidx.compose.runtime.setValue
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.core.content.ContextCompat
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.example.cloroapp.data.Usuario
 import com.example.cloroapp.domain.EstadoAlerta
 import com.example.cloroapp.domain.Formato
 import com.example.cloroapp.domain.TipoDesviacion
+import com.example.cloroapp.domain.ValidadorFormularios
+import com.example.cloroapp.notificaciones.Notificador
 import com.example.cloroapp.ui.AppViewModelProvider
 import com.example.cloroapp.ui.componentes.EncabezadoDetalle
 import com.example.cloroapp.ui.componentes.EtiquetaEstado
 import com.example.cloroapp.ui.componentes.paleta
 import com.example.cloroapp.ui.viewmodel.AlertaDetalleViewModel
+import kotlinx.coroutines.launch
 
 @Composable
 fun AlertaDetalleScreen(
@@ -52,7 +81,27 @@ fun AlertaDetalleScreen(
     val detalle by vm.alerta.collectAsStateWithLifecycle()
     val acciones by vm.acciones.collectAsStateWithLifecycle()
     val mensaje by vm.mensaje.collectAsStateWithLifecycle()
-    var descripcion by rememberSaveable { mutableStateOf("") }
+    val descripcion by vm.descripcionAccion.collectAsStateWithLifecycle()
+    val errorDescripcion by vm.errorDescripcion.collectAsStateWithLifecycle()
+    val fotoEvidencia by vm.fotoEvidencia.collectAsStateWithLifecycle()
+    val contexto = LocalContext.current
+    val scope = rememberCoroutineScope()
+
+    val lanzadorCamara = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.TakePicturePreview()
+    ) { bitmap ->
+        if (bitmap != null) vm.adjuntarFotoEvidencia(bitmap)
+    }
+
+    val lanzadorPermisoCamara = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestPermission()
+    ) { concedido ->
+        if (concedido) {
+            lanzadorCamara.launch()
+        } else {
+            scope.launch { snackbar.showSnackbar("Permiso de cámara no concedido.") }
+        }
+    }
 
     LaunchedEffect(mensaje) {
         mensaje?.let {
@@ -62,9 +111,39 @@ fun AlertaDetalleScreen(
     }
 
     Column(modifier = Modifier.fillMaxSize()) {
-        EncabezadoDetalle(titulo = "Detalle de alerta", onVolver = onVolver)
-
         val d = detalle
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.SpaceBetween
+        ) {
+            Box(modifier = Modifier.weight(1f)) {
+                EncabezadoDetalle(titulo = "Detalle de alerta", onVolver = onVolver)
+            }
+            if (d != null) {
+                IconButton(
+                    onClick = {
+                        val a = d.alerta
+                        val resumen = buildString {
+                            appendLine("Reporte de Alerta — CloroApp")
+                            appendLine("Punto: ${d.codigoPunto} (${d.granjaNombre} · ${d.galpon})")
+                            appendLine("Desviación: ${a.tipo.etiqueta} (${a.severidad.etiqueta})")
+                            appendLine("Valor medido: ${Formato.ppm(a.valorPpm)} el ${Formato.fechaHora(a.fechaHoraMillis)}")
+                            appendLine("Estado: ${a.estado.etiqueta}")
+                            appendLine("Acciones registradas: ${acciones.size}")
+                        }
+                        Notificador.compartirReporte(
+                            context = contexto,
+                            asunto = "Alerta ${d.codigoPunto} - ${a.tipo.etiqueta}",
+                            contenido = resumen
+                        )
+                    }
+                ) {
+                    Icon(Icons.Filled.Share, contentDescription = "Compartir reporte de alerta")
+                }
+            }
+        }
+
         if (d == null) {
             Text(
                 text = "Cargando alerta…",
@@ -79,7 +158,9 @@ fun AlertaDetalleScreen(
         val cerrada = alerta.estado == EstadoAlerta.CERRADA
 
         LazyColumn(
-            modifier = Modifier.fillMaxSize(),
+            modifier = Modifier
+                .fillMaxSize()
+                .animateContentSize(),
             contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
@@ -139,23 +220,103 @@ fun AlertaDetalleScreen(
 
             if (!cerrada && usuario.rol.puedeRegistrarMediciones) {
                 item {
-                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Column(
+                        verticalArrangement = Arrangement.spacedBy(8.dp),
+                        modifier = Modifier.animateContentSize()
+                    ) {
                         OutlinedTextField(
                             value = descripcion,
-                            onValueChange = { descripcion = it },
+                            onValueChange = vm::actualizarDescripcion,
                             label = { Text("Acción correctiva realizada") },
+                            placeholder = { Text("Ej. Se ajustó bomba dosificadora y se purgó la línea por 5 min") },
+                            leadingIcon = {
+                                Icon(
+                                    imageVector = if (errorDescripcion != null) Icons.Filled.Warning else Icons.Filled.Build,
+                                    contentDescription = null,
+                                    tint = if (errorDescripcion != null) MaterialTheme.colorScheme.error
+                                    else MaterialTheme.colorScheme.primary
+                                )
+                            },
+                            trailingIcon = {
+                                if (descripcion.isNotEmpty()) {
+                                    IconButton(onClick = { vm.actualizarDescripcion("") }) {
+                                        Icon(Icons.Filled.Clear, contentDescription = "Limpiar descripción")
+                                    }
+                                }
+                            },
+                            isError = errorDescripcion != null,
+                            supportingText = {
+                                Text(
+                                    text = errorDescripcion
+                                        ?: "Mínimo ${ValidadorFormularios.MIN_CARACTERES_ACCION} caracteres (${descripcion.trim().length}/${ValidadorFormularios.MAX_CARACTERES_ACCION})",
+                                    color = if (errorDescripcion != null) MaterialTheme.colorScheme.error
+                                    else MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            },
                             minLines = 2,
                             modifier = Modifier.fillMaxWidth()
                         )
-                        Button(
+
+                        OutlinedButton(
                             onClick = {
-                                vm.registrarAccion(descripcion)
-                                descripcion = ""
+                                val tienePermiso = ContextCompat.checkSelfPermission(
+                                    contexto,
+                                    Manifest.permission.CAMERA
+                                ) == PackageManager.PERMISSION_GRANTED
+                                if (tienePermiso) lanzadorCamara.launch()
+                                else lanzadorPermisoCamara.launch(Manifest.permission.CAMERA)
                             },
-                            enabled = descripcion.isNotBlank(),
                             modifier = Modifier.fillMaxWidth()
                         ) {
-                            Text("Registrar acción correctiva")
+                            Icon(Icons.Filled.Add, contentDescription = null)
+                            Text(
+                                if (fotoEvidencia == null) "  Adjuntar fotografía de respaldo (Cámara)"
+                                else "  Cambiar fotografía de respaldo"
+                            )
+                        }
+
+                        AnimatedVisibility(
+                            visible = fotoEvidencia != null,
+                            enter = fadeIn(),
+                            exit = fadeOut()
+                        ) {
+                            fotoEvidencia?.let { bmp ->
+                                Card(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
+                                ) {
+                                    Column(modifier = Modifier.padding(10.dp)) {
+                                        Row(
+                                            modifier = Modifier.fillMaxWidth(),
+                                            horizontalArrangement = Arrangement.SpaceBetween,
+                                            verticalAlignment = Alignment.CenterVertically
+                                        ) {
+                                            Text("Evidencia adjunta", style = MaterialTheme.typography.labelMedium)
+                                            IconButton(onClick = { vm.adjuntarFotoEvidencia(null) }) {
+                                                Icon(Icons.Filled.Delete, contentDescription = "Quitar evidencia")
+                                            }
+                                        }
+                                        Image(
+                                            bitmap = bmp.asImageBitmap(),
+                                            contentDescription = "Evidencia de acción correctiva",
+                                            contentScale = ContentScale.Crop,
+                                            modifier = Modifier
+                                                .fillMaxWidth()
+                                                .height(140.dp)
+                                                .clip(RoundedCornerShape(8.dp))
+                                        )
+                                    }
+                                }
+                            }
+                        }
+
+                        Button(
+                            onClick = { vm.registrarAccion() },
+                            enabled = ValidadorFormularios.validarAccionCorrectiva(descripcion) == null,
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Icon(Icons.Filled.CheckCircle, contentDescription = null)
+                            Text("  Registrar acción correctiva")
                         }
                         OutlinedButton(
                             onClick = { onRegistrarMedicion(alerta.puntoMedicionId) },
@@ -214,6 +375,11 @@ fun AlertaDetalleScreen(
             }
         }
     }
+}
+
+@Composable
+private fun Box(modifier: Modifier = Modifier, content: @Composable () -> Unit) {
+    androidx.compose.foundation.layout.Box(modifier = modifier) { content() }
 }
 
 /** Las acciones correctivas difieren según el tipo de desviación (respuesta 5). */

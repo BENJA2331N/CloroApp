@@ -1,5 +1,8 @@
 package com.example.cloroapp.ui.componentes
 
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.animateContentSize
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -69,15 +72,24 @@ fun EtiquetaEstado(estado: EstadoCloro, modifier: Modifier = Modifier) {
 fun TarjetaPunto(punto: PuntoResumen, onClick: () -> Unit, modifier: Modifier = Modifier) {
     val estado = punto.estado
     val paleta = estado?.paleta()
-    val colorTexto = paleta?.texto ?: MaterialTheme.colorScheme.onSurfaceVariant
+    val colorTexto by animateColorAsState(
+        targetValue = paleta?.texto ?: MaterialTheme.colorScheme.onSurfaceVariant,
+        animationSpec = tween(durationMillis = 300),
+        label = "colorTextoPunto"
+    )
+    val colorFondo by animateColorAsState(
+        targetValue = paleta?.fondo ?: MaterialTheme.colorScheme.surfaceVariant,
+        animationSpec = tween(durationMillis = 300),
+        label = "colorFondoPunto"
+    )
 
     Card(
         onClick = onClick,
-        modifier = modifier.fillMaxWidth(),
+        modifier = modifier
+            .fillMaxWidth()
+            .animateContentSize(),
         shape = RoundedCornerShape(14.dp),
-        colors = CardDefaults.cardColors(
-            containerColor = paleta?.fondo ?: MaterialTheme.colorScheme.surfaceVariant
-        )
+        colors = CardDefaults.cardColors(containerColor = colorFondo)
     ) {
         Row(
             modifier = Modifier

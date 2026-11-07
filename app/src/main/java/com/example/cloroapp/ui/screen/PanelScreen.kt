@@ -1,5 +1,9 @@
 package com.example.cloroapp.ui.screen
 
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.animateContentSize
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -14,16 +18,22 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Share
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.FilterChip
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -34,6 +44,7 @@ import com.example.cloroapp.domain.EstadoCloro
 import com.example.cloroapp.domain.Formato
 import com.example.cloroapp.domain.Periodo
 import com.example.cloroapp.domain.RangosCloro
+import com.example.cloroapp.notificaciones.Notificador
 import com.example.cloroapp.ui.AppViewModelProvider
 import com.example.cloroapp.ui.componentes.TarjetaDato
 import com.example.cloroapp.ui.componentes.paleta
@@ -63,7 +74,7 @@ private fun resumirPorGranja(estadisticas: List<EstadisticaPunto>): List<Resumen
         )
     }
 
-/** Panel con mediciones actuales, alertas, promedios, máximos, mínimos y comparación entre granjas y puntos. */
+/** Panel con mediciones actuales, alertas, promedios, barras animadas y exportación de reporte nativo. */
 @Composable
 fun PanelScreen(vm: PanelViewModel = viewModel(factory = AppViewModelProvider.Factory)) {
     val periodo by vm.periodo.collectAsStateWithLifecycle()
@@ -72,6 +83,7 @@ fun PanelScreen(vm: PanelViewModel = viewModel(factory = AppViewModelProvider.Fa
     val puntosActuales by vm.puntosActuales.collectAsStateWithLifecycle()
     val alertasPendientes by vm.alertasPendientes.collectAsStateWithLifecycle()
     val rangos by vm.rangos.collectAsStateWithLifecycle()
+    val contexto = LocalContext.current
 
     val resumenGranjas = remember(estadisticas) { resumirPorGranja(estadisticas) }
     val puntosFiltrados = remember(estadisticas, granjaId) {
@@ -81,16 +93,46 @@ fun PanelScreen(vm: PanelViewModel = viewModel(factory = AppViewModelProvider.Fa
     val totalDesviaciones = estadisticas.sumOf { it.desviaciones }
 
     LazyColumn(
-        modifier = Modifier.fillMaxSize(),
+        modifier = Modifier
+            .fillMaxSize()
+            .animateContentSize(),
         contentPadding = PaddingValues(16.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
         item {
-            Text(
-                text = "Panel de calidad del agua",
-                style = MaterialTheme.typography.headlineMedium,
-                fontWeight = FontWeight.Bold
-            )
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = "Panel de calidad del agua",
+                    style = MaterialTheme.typography.headlineMedium,
+                    fontWeight = FontWeight.Bold,
+                    modifier = Modifier.weight(1f)
+                )
+                IconButton(
+                    onClick = {
+                        val reporte = buildString {
+                            appendLine("Reporte Ejecutivo de Calidad del Agua — CloroApp")
+                            appendLine("Período analizado: ${periodo.etiqueta}")
+                            appendLine("Total mediciones: $totalMediciones | Desviaciones: $totalDesviaciones")
+                            appendLine("Alertas pendientes activas: $alertasPendientes")
+                            appendLine("---")
+                            resumenGranjas.forEach { g ->
+                                appendLine("${g.nombre}: Promedio ${Formato.ppm(g.promedio)} (mín ${Formato.decimal(g.minimo)}, máx ${Formato.decimal(g.maximo)})")
+                            }
+                        }
+                        Notificador.compartirReporte(
+                            context = contexto,
+                            asunto = "Reporte CloroApp (${periodo.etiqueta})",
+                            contenido = reporte
+                        )
+                    }
+                ) {
+                    Icon(Icons.Filled.Share, contentDescription = "Compartir reporte ejecutivo")
+                }
+            }
         }
 
         item {
@@ -150,7 +192,9 @@ fun PanelScreen(vm: PanelViewModel = viewModel(factory = AppViewModelProvider.Fa
         }
         items(resumenGranjas, key = { "resumen-${it.granjaId}" }) { granja ->
             Card(
-                modifier = Modifier.fillMaxWidth(),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .animateContentSize(),
                 shape = RoundedCornerShape(12.dp),
                 colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
             ) {
@@ -219,12 +263,23 @@ fun PanelScreen(vm: PanelViewModel = viewModel(factory = AppViewModelProvider.Fa
     }
 }
 
-/** Barra horizontal coloreada según el estado que corresponde al valor promedio. */
+/** Barra horizontal animada y coloreada según el estado que corresponde al valor promedio (IE 2.2.2). */
 @Composable
 private fun BarraPromedio(valor: Double, rangos: RangosCloro) {
     val maximo = (rangos.criticoMax + 1.0).toFloat()
-    val fraccion = (valor.toFloat() / maximo).coerceIn(0.02f, 1f)
-    val color = ClasificadorCloro.clasificar(valor, rangos).estado.paleta().texto
+    val fraccionObjetivo = (valor.toFloat() / maximo).coerceIn(0.02f, 1f)
+    val fraccionAnimada by animateFloatAsState(
+        targetValue = fraccionObjetivo,
+        animationSpec = tween(durationMillis = 500),
+        label = "barraPromedioFraccion"
+    )
+    val colorObjetivo = ClasificadorCloro.clasificar(valor, rangos).estado.paleta().texto
+    val colorAnimado by animateColorAsState(
+        targetValue = colorObjetivo,
+        animationSpec = tween(durationMillis = 400),
+        label = "barraPromedioColor"
+    )
+
     Box(
         modifier = Modifier
             .fillMaxWidth()
@@ -234,9 +289,9 @@ private fun BarraPromedio(valor: Double, rangos: RangosCloro) {
     ) {
         Box(
             modifier = Modifier
-                .fillMaxWidth(fraccion)
+                .fillMaxWidth(fraccionAnimada)
                 .fillMaxHeight()
-                .background(color)
+                .background(colorAnimado)
         )
     }
 }

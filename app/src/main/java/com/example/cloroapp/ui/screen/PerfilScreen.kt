@@ -4,6 +4,8 @@ import android.Manifest
 import android.os.Build
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.animateContentSize
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -16,6 +18,9 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ExitToApp
+import androidx.compose.material.icons.filled.Build
+import androidx.compose.material.icons.filled.CheckCircle
+import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
@@ -45,6 +50,7 @@ import com.example.cloroapp.data.Granja
 import com.example.cloroapp.data.Usuario
 import com.example.cloroapp.domain.Formato
 import com.example.cloroapp.domain.RangosCloro
+import com.example.cloroapp.domain.ValidadorFormularios
 import com.example.cloroapp.ui.viewmodel.SesionViewModel
 
 @Composable
@@ -68,7 +74,8 @@ fun PerfilScreen(usuario: Usuario, sesionVm: SesionViewModel) {
         modifier = Modifier
             .fillMaxSize()
             .verticalScroll(rememberScrollState())
-            .padding(16.dp),
+            .padding(16.dp)
+            .animateContentSize(),
         verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
         Text("Perfil", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold)
@@ -96,8 +103,12 @@ fun PerfilScreen(usuario: Usuario, sesionVm: SesionViewModel) {
                 "Controles pendientes de envío: $pendientes.",
             style = MaterialTheme.typography.bodyMedium
         )
-        estadoSync.mensaje?.let {
-            Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        AnimatedVisibility(visible = estadoSync.mensaje != null) {
+            Text(
+                text = estadoSync.mensaje ?: "",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
         }
         Button(
             onClick = sesionVm::sincronizarAhora,
@@ -139,7 +150,8 @@ fun PerfilScreen(usuario: Usuario, sesionVm: SesionViewModel) {
         )
         if (usuario.rol.puedeConfigurarRangos) {
             OutlinedButton(onClick = { mostrarRangos = true }, modifier = Modifier.fillMaxWidth()) {
-                Text("Configurar rangos")
+                Icon(Icons.Filled.Build, contentDescription = null)
+                Text("  Configurar rangos")
             }
         }
 
@@ -193,35 +205,37 @@ private fun DialogoRangos(
     var normalMin by remember { mutableStateOf(Formato.decimal(actual.normalMin)) }
     var normalMax by remember { mutableStateOf(Formato.decimal(actual.normalMax)) }
     var criticoMax by remember { mutableStateOf(Formato.decimal(actual.criticoMax)) }
-    var error by remember { mutableStateOf<String?>(null) }
+
+    val validacion = remember(criticoMin, normalMin, normalMax, criticoMax) {
+        ValidadorFormularios.validarRangos(criticoMin, normalMin, normalMax, criticoMax)
+    }
 
     AlertDialog(
         onDismissRequest = onCerrar,
         title = { Text("Rangos de cloro libre (ppm)") },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                CampoRango("Crítico si es menor que", criticoMin) { criticoMin = it }
-                CampoRango("Normal desde", normalMin) { normalMin = it }
-                CampoRango("Normal hasta", normalMax) { normalMax = it }
-                CampoRango("Crítico si es mayor que", criticoMax) { criticoMax = it }
+                CampoRango("Crítico si es menor que", criticoMin, validacion.errorCriticoMin) { criticoMin = it }
+                CampoRango("Normal desde", normalMin, validacion.errorNormalMin) { normalMin = it }
+                CampoRango("Normal hasta", normalMax, validacion.errorNormalMax) { normalMax = it }
+                CampoRango("Crítico si es mayor que", criticoMax, validacion.errorCriticoMax) { criticoMax = it }
                 Text(
-                    text = error ?: "Deben ir de menor a mayor. Entre un límite crítico y el rango normal el estado es advertencia.",
+                    text = validacion.errorGeneral
+                        ?: "Deben ir de menor a mayor. Entre un límite crítico y el rango normal el estado es advertencia.",
                     style = MaterialTheme.typography.bodySmall,
-                    color = if (error != null) MaterialTheme.colorScheme.error
+                    color = if (validacion.errorGeneral != null) MaterialTheme.colorScheme.error
                     else MaterialTheme.colorScheme.onSurfaceVariant
                 )
             }
         },
         confirmButton = {
-            TextButton(onClick = {
-                val nuevos = listOf(criticoMin, normalMin, normalMax, criticoMax).map { Formato.parsear(it) }
-                if (nuevos.any { it == null }) {
-                    error = "Ingresa números válidos."
-                } else {
-                    val rangos = RangosCloro(nuevos[0]!!, nuevos[1]!!, nuevos[2]!!, nuevos[3]!!)
-                    if (onGuardar(rangos)) onCerrar() else error = "Los valores deben ir de menor a mayor."
+            TextButton(
+                enabled = validacion.esValido,
+                onClick = {
+                    val rangos = validacion.rangosValidos ?: return@TextButton
+                    if (onGuardar(rangos)) onCerrar()
                 }
-            }) { Text("Guardar") }
+            ) { Text("Guardar") }
         },
         dismissButton = {
             Row {
@@ -236,11 +250,27 @@ private fun DialogoRangos(
 }
 
 @Composable
-private fun CampoRango(etiqueta: String, valor: String, onCambio: (String) -> Unit) {
+private fun CampoRango(
+    etiqueta: String,
+    valor: String,
+    errorCampo: String?,
+    onCambio: (String) -> Unit
+) {
     OutlinedTextField(
         value = valor,
         onValueChange = onCambio,
         label = { Text(etiqueta) },
+        leadingIcon = {
+            Icon(
+                imageVector = if (errorCampo != null) Icons.Filled.Warning else Icons.Filled.CheckCircle,
+                contentDescription = null,
+                tint = if (errorCampo != null) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary
+            )
+        },
+        isError = errorCampo != null,
+        supportingText = errorCampo?.let { msg ->
+            { Text(msg, color = MaterialTheme.colorScheme.error) }
+        },
         singleLine = true,
         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
         modifier = Modifier.fillMaxWidth()

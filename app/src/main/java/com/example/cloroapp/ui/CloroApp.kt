@@ -5,6 +5,10 @@ import android.content.pm.PackageManager
 import android.os.Build
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.animation.Crossfade
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
@@ -71,26 +75,34 @@ private fun pestanasPara(rol: Rol): List<Pestana> = when (rol) {
 @Composable
 fun CloroApp(sesionVm: SesionViewModel = viewModel(factory = AppViewModelProvider.Factory)) {
     val sesion by sesionVm.sesion.collectAsStateWithLifecycle()
-    val usuario = sesion.usuario
 
-    when {
-        sesion.cargando -> {
-            Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                CircularProgressIndicator()
+    Crossfade(
+        targetState = sesion.cargando to sesion.usuario,
+        animationSpec = tween(durationMillis = 300),
+        label = "transicionSesion"
+    ) { (cargando, usuario) ->
+        when {
+            cargando -> {
+                Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                    CircularProgressIndicator()
+                }
             }
-        }
 
-        usuario == null -> {
-            Scaffold { padding ->
-                LoginScreen(
-                    estado = sesion,
-                    onIniciarSesion = sesionVm::iniciarSesion,
-                    modifier = Modifier.padding(padding)
-                )
+            usuario == null -> {
+                Scaffold { padding ->
+                    LoginScreen(
+                        estado = sesion,
+                        onCambioCorreo = sesionVm::actualizarCorreo,
+                        onCambioContrasena = sesionVm::actualizarContrasena,
+                        onSeleccionarDemo = sesionVm::completarCredencialesDemo,
+                        onIniciarSesion = sesionVm::iniciarSesion,
+                        modifier = Modifier.padding(padding)
+                    )
+                }
             }
-        }
 
-        else -> ContenidoPrincipal(usuario = usuario, sesionVm = sesionVm)
+            else -> ContenidoPrincipal(usuario = usuario, sesionVm = sesionVm)
+        }
     }
 }
 
@@ -142,6 +154,10 @@ private fun ContenidoPrincipal(usuario: Usuario, sesionVm: SesionViewModel) {
         NavHost(
             navController = navController,
             startDestination = inicio,
+            enterTransition = { fadeIn(animationSpec = tween(250)) },
+            exitTransition = { fadeOut(animationSpec = tween(250)) },
+            popEnterTransition = { fadeIn(animationSpec = tween(250)) },
+            popExitTransition = { fadeOut(animationSpec = tween(250)) },
             modifier = Modifier.padding(padding)
         ) {
             composable("puntos") {
