@@ -5,8 +5,10 @@ import com.example.cloroapp.domain.EstadoCloro
 import com.example.cloroapp.domain.Formato
 import com.example.cloroapp.domain.RangosCloro
 import com.example.cloroapp.domain.TipoDesviacion
+import com.example.cloroapp.domain.ValidadorFormularios
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -93,5 +95,23 @@ class ClasificadorCloroTest {
         assertEquals("3,50 ppm", Formato.ppm(3.5))
         assertEquals(3.5, Formato.parsear("3,5")!!, 0.0)
         assertNull(Formato.parsear("abc"))
+    }
+
+    @Test
+    fun validadorFormularios_validaCamposDeManeraDesacoplada() {
+        assertNull(ValidadorFormularios.validarCorreo("operario1@cloroapp.cl"))
+        assertNotNull(ValidadorFormularios.validarCorreo("correo_sin_arroba"))
+
+        assertNull(ValidadorFormularios.validarContrasena("cloro123"))
+        assertNotNull(ValidadorFormularios.validarContrasena("123"))
+
+        assertNull(ValidadorFormularios.validarValorPpm("3,80"))
+        assertNotNull(ValidadorFormularios.validarValorPpm("15,00"))
+
+        assertNull(ValidadorFormularios.validarAccionCorrectiva("Se ajustó la bomba dosificadora principal."))
+        assertNotNull(ValidadorFormularios.validarAccionCorrectiva("ok"))
+
+        assertTrue(ValidadorFormularios.validarRangos("2,00", "3,00", "5,00", "6,00").esValido)
+        assertFalse(ValidadorFormularios.validarRangos("4,00", "3,00", "5,00", "6,00").esValido)
     }
 }

@@ -1,5 +1,6 @@
 package com.example.cloroapp.ui.viewmodel
 
+import android.graphics.Bitmap
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.cloroapp.data.CloroRepository
@@ -10,6 +11,7 @@ import com.example.cloroapp.domain.EstadoCloro
 import com.example.cloroapp.domain.Formato
 import com.example.cloroapp.domain.RangosCloro
 import com.example.cloroapp.domain.ResultadoClasificacion
+import com.example.cloroapp.domain.ValidadorFormularios
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -23,6 +25,9 @@ data class RegistroUiState(
     val puntoSeleccionado: PuntoResumen? = null,
     val valorTexto: String = "4,00",
     val valor: Double? = 4.0,
+    val errorValor: String? = null,
+    val observacion: String = "",
+    val fotoEvidencia: Bitmap? = null,
     val clasificacion: ResultadoClasificacion? = null,
     val mensajeEstado: String = "",
     val rangos: RangosCloro = RangosCloro(),
@@ -31,38 +36,37 @@ data class RegistroUiState(
     val mensaje: String? = null
 )
 
-/** Registro manual de controles de cloro en terreno (operarios y supervisores). */
+/** Registro manual de controles de cloro en terreno con validación centralizada y evidencia fotográfica nativa. */
 class RegistroViewModel(private val repo: CloroRepository, prefs: PreferenciasRepository) : ViewModel() {
 
     private data class Local(
-        val seleccionadoId: Long?,
-        val valorTexto: String,
-        val guardando: Boolean,
-        val mensaje: String?
+        val seleccionadoId: Long? = null,
+        val valorTexto: String = Formato.decimal(4.0),
+        val observacion: String = "",
+        val fotoEvidencia: Bitmap? = null,
+        val guardando: Boolean = false,
+        val mensaje: String? = null
     )
 
-    private val seleccionadoId = MutableStateFlow<Long?>(null)
-    private val valorTexto = MutableStateFlow(Formato.decimal(4.0))
-    private val guardando = MutableStateFlow(false)
-    private val mensaje = MutableStateFlow<String?>(null)
-
-    private val local = combine(seleccionadoId, valorTexto, guardando, mensaje) { id, texto, ocupado, msg ->
-        Local(id, texto, ocupado, msg)
-    }
+    private val local = MutableStateFlow(Local())
 
     val uiState: StateFlow<RegistroUiState> = combine(
         repo.puntos, prefs.rangos, repo.controlesHoy, local
     ) { puntos, rangos, controles, estadoLocal ->
-        val valor = Formato.parsear(estadoLocal.valorTexto)?.takeIf { it in 0.0..10.0 }
+        val errorCampo = ValidadorFormularios.validarValorPpm(estadoLocal.valorTexto)
+        val valor = if (errorCampo == null) Formato.parsear(estadoLocal.valorTexto) else null
         val clasificacion = valor?.let { ClasificadorCloro.clasificar(it, rangos) }
         RegistroUiState(
             puntos = puntos,
             puntoSeleccionado = puntos.firstOrNull { it.puntoId == estadoLocal.seleccionadoId } ?: puntos.firstOrNull(),
             valorTexto = estadoLocal.valorTexto,
             valor = valor,
+            errorValor = errorCampo,
+            observacion = estadoLocal.observacion,
+            fotoEvidencia = estadoLocal.fotoEvidencia,
             clasificacion = clasificacion,
             mensajeEstado = clasificacion?.let { ClasificadorCloro.mensaje(it, rangos) }
-                ?: "Ingresa un valor entre 0,00 y 10,00 ppm",
+                ?: (errorCampo ?: "Ingresa un valor entre 0,00 y 10,00 ppm"),
             rangos = rangos,
             controlesHoy = controles,
             guardando = estadoLocal.guardando,
@@ -71,47 +75,67 @@ class RegistroViewModel(private val repo: CloroRepository, prefs: PreferenciasRe
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), RegistroUiState())
 
     fun seleccionarPunto(id: Long) {
-        seleccionadoId.value = id
+        local.value = local.value.copy(seleccionadoId = id)
     }
 
     fun cambiarTexto(texto: String) {
-        valorTexto.value = texto.filter { it.isDigit() || it == ',' || it == '.' }.take(6)
+        val filtrado = texto.filter { it.isDigit() || it == ',' || it == '.' || it == '-' }.take(6)
+        local.value = local.value.copy(valorTexto = filtrado)
+    }
+
+    fun cambiarObservacion(texto: String) {
+        local.value = local.value.copy(observacion = texto.take(120))
+    }
+
+    fun adjuntarFotoEvidencia(bitmap: Bitmap?) {
+        local.value = local.value.copy(
+            fotoEvidencia = bitmap,
+            mensaje = if (bitmap != null) "Fotografía del fotómetro adjuntada correctamente." else null
+        )
     }
 
     /** Ajuste fino con los botones -0,1 / +0,1 (el valor siempre se mantiene entre 0 y 10 ppm). */
     fun ajustar(delta: Double) {
-        val actual = Formato.parsear(valorTexto.value) ?: 0.0
+        val actual = Formato.parsear(local.value.valorTexto) ?: 0.0
         val nuevo = (Math.round((actual + delta) * 100.0) / 100.0).coerceIn(0.0, 10.0)
-        valorTexto.value = Formato.decimal(nuevo)
+        local.value = local.value.copy(valorTexto = Formato.decimal(nuevo))
     }
 
     fun consumirMensaje() {
-        mensaje.value = null
+        local.value = local.value.copy(mensaje = null)
     }
 
     fun registrar() {
         val estado = uiState.value
         val punto = estado.puntoSeleccionado ?: run {
-            mensaje.value = "Selecciona un punto de medición."
+            local.value = local.value.copy(mensaje = "Selecciona un punto de medición.")
             return
         }
-        val valor = estado.valor ?: run {
-            mensaje.value = "Ingresa un valor válido entre 0,00 y 10,00 ppm."
+        val errorValidacion = ValidadorFormularios.validarValorPpm(estado.valorTexto)
+        val valor = estado.valor
+        if (errorValidacion != null || valor == null) {
+            local.value = local.value.copy(mensaje = errorValidacion ?: "Ingresa un valor válido entre 0,00 y 10,00 ppm.")
             return
         }
         viewModelScope.launch {
-            guardando.value = true
-            mensaje.value = try {
+            local.value = local.value.copy(guardando = true)
+            val resultadoMensaje = try {
                 val nivel = repo.registrarMedicionManual(punto.puntoId, valor)
                 val alerta = if (nivel.estado == EstadoCloro.NORMAL) "" else " Revisa la sección Alertas."
                 val pendiente = if (nivel.sincronizado) "" else " Pendiente de sincronización."
-                "Medición registrada: ${Formato.ppm(nivel.valorPpm)} (${nivel.estado.etiqueta}).$alerta$pendiente"
+                val conFoto = if (estado.fotoEvidencia != null) " (con evidencia fotográfica)" else ""
+                "Medición registrada$conFoto: ${Formato.ppm(nivel.valorPpm)} (${nivel.estado.etiqueta}).$alerta$pendiente"
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
                 e.message ?: "No se pudo registrar la medición."
             }
-            guardando.value = false
+            local.value = local.value.copy(
+                guardando = false,
+                observacion = "",
+                fotoEvidencia = null,
+                mensaje = resultadoMensaje
+            )
         }
     }
 }

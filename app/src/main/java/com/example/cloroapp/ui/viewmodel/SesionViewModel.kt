@@ -8,6 +8,7 @@ import com.example.cloroapp.data.ResultadoSync
 import com.example.cloroapp.data.Usuario
 import com.example.cloroapp.data.remote.SimuladorCloro
 import com.example.cloroapp.domain.RangosCloro
+import com.example.cloroapp.domain.ValidadorFormularios
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -21,6 +22,10 @@ import kotlinx.coroutines.launch
 data class SesionUiState(
     val cargando: Boolean = true,
     val usuario: Usuario? = null,
+    val correo: String = "",
+    val contrasena: String = "",
+    val errorCorreo: String? = null,
+    val errorContrasena: String? = null,
     val iniciando: Boolean = false,
     val error: String? = null
 )
@@ -30,20 +35,37 @@ data class EstadoSync(
     val mensaje: String? = null
 )
 
-/** Sesión del usuario, configuración de la app y actualización periódica de datos. */
+/** Sesión del usuario, validación desacoplada del formulario de acceso, configuración y sincronización. */
 class SesionViewModel(contenedor: ContenedorApp) : ViewModel() {
 
     private val repo = contenedor.repositorio
     private val prefs = contenedor.preferencias
 
+    private data class FormularioLogin(
+        val correo: String = "",
+        val contrasena: String = "",
+        val errorCorreo: String? = null,
+        val errorContrasena: String? = null,
+        val iniciando: Boolean = false,
+        val errorGeneral: String? = null
+    )
+
     private val cargandoInicial = MutableStateFlow(true)
-    private val iniciando = MutableStateFlow(false)
-    private val error = MutableStateFlow<String?>(null)
+    private val formLogin = MutableStateFlow(FormularioLogin())
 
     val sesion: StateFlow<SesionUiState> = combine(
-        repo.usuarioActual, cargandoInicial, iniciando, error
-    ) { usuario, cargando, iniciandoSesion, mensajeError ->
-        SesionUiState(cargando, usuario, iniciandoSesion, mensajeError)
+        repo.usuarioActual, cargandoInicial, formLogin
+    ) { usuario, cargando, form ->
+        SesionUiState(
+            cargando = cargando,
+            usuario = usuario,
+            correo = form.correo,
+            contrasena = form.contrasena,
+            errorCorreo = form.errorCorreo,
+            errorContrasena = form.errorContrasena,
+            iniciando = form.iniciando,
+            error = form.errorGeneral
+        )
     }.stateIn(viewModelScope, SharingStarted.Eagerly, SesionUiState())
 
     val rangos: StateFlow<RangosCloro> =
@@ -77,17 +99,60 @@ class SesionViewModel(contenedor: ContenedorApp) : ViewModel() {
         }
     }
 
-    fun iniciarSesion(correo: String, contrasena: String) {
-        if (correo.isBlank() || contrasena.isBlank()) {
-            error.value = "Ingresa tu correo y tu contraseña."
+    fun actualizarCorreo(nuevoCorreo: String) {
+        val errorCampo = if (nuevoCorreo.isEmpty()) null else ValidadorFormularios.validarCorreo(nuevoCorreo)
+        formLogin.value = formLogin.value.copy(
+            correo = nuevoCorreo,
+            errorCorreo = errorCampo,
+            errorGeneral = null
+        )
+    }
+
+    fun actualizarContrasena(nuevaContrasena: String) {
+        val errorCampo = if (nuevaContrasena.isEmpty()) null else ValidadorFormularios.validarContrasena(nuevaContrasena)
+        formLogin.value = formLogin.value.copy(
+            contrasena = nuevaContrasena,
+            errorContrasena = errorCampo,
+            errorGeneral = null
+        )
+    }
+
+    fun completarCredencialesDemo(correoDemo: String, claveDemo: String = "cloro123") {
+        formLogin.value = FormularioLogin(
+            correo = correoDemo,
+            contrasena = claveDemo
+        )
+    }
+
+    fun iniciarSesion(correo: String = formLogin.value.correo, contrasena: String = formLogin.value.contrasena) {
+        val errCorreo = ValidadorFormularios.validarCorreo(correo)
+        val errClave = ValidadorFormularios.validarContrasena(contrasena)
+        if (errCorreo != null || errClave != null) {
+            formLogin.value = formLogin.value.copy(
+                correo = correo,
+                contrasena = contrasena,
+                errorCorreo = errCorreo,
+                errorContrasena = errClave,
+                errorGeneral = "Revisa los campos destacados en rojo antes de continuar."
+            )
             return
         }
         viewModelScope.launch {
-            iniciando.value = true
-            error.value = null
+            formLogin.value = formLogin.value.copy(
+                iniciando = true,
+                errorCorreo = null,
+                errorContrasena = null,
+                errorGeneral = null
+            )
             val usuario = repo.iniciarSesion(correo, contrasena)
-            iniciando.value = false
-            if (usuario == null) error.value = "Correo o contraseña incorrectos."
+            formLogin.value = if (usuario == null) {
+                formLogin.value.copy(
+                    iniciando = false,
+                    errorGeneral = "Credenciales no reconocidas. Verifica tu correo o contraseña."
+                )
+            } else {
+                FormularioLogin()
+            }
         }
     }
 

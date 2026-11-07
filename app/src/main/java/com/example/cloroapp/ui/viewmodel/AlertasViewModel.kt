@@ -1,5 +1,6 @@
 package com.example.cloroapp.ui.viewmodel
 
+import android.graphics.Bitmap
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.cloroapp.data.AccionCorrectiva
@@ -10,6 +11,7 @@ import com.example.cloroapp.data.PreferenciasRepository
 import com.example.cloroapp.data.PuntoResumen
 import com.example.cloroapp.domain.Periodo
 import com.example.cloroapp.domain.RangosCloro
+import com.example.cloroapp.domain.ValidadorFormularios
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -35,13 +37,22 @@ class AlertasViewModel(repo: CloroRepository) : ViewModel() {
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 }
 
-/** Detalle de una alerta: acciones correctivas realizadas y cierre por el supervisor. */
+/** Detalle de una alerta: acciones correctivas realizadas, validación desacoplada y cierre por el supervisor. */
 @OptIn(ExperimentalCoroutinesApi::class)
 class AlertaDetalleViewModel(private val repo: CloroRepository) : ViewModel() {
 
     private val alertaId = MutableStateFlow(-1L)
     private val _mensaje = MutableStateFlow<String?>(null)
     val mensaje: StateFlow<String?> = _mensaje.asStateFlow()
+
+    private val _descripcionAccion = MutableStateFlow("")
+    val descripcionAccion: StateFlow<String> = _descripcionAccion.asStateFlow()
+
+    private val _errorDescripcion = MutableStateFlow<String?>(null)
+    val errorDescripcion: StateFlow<String?> = _errorDescripcion.asStateFlow()
+
+    private val _fotoEvidencia = MutableStateFlow<Bitmap?>(null)
+    val fotoEvidencia: StateFlow<Bitmap?> = _fotoEvidencia.asStateFlow()
 
     fun seleccionar(id: Long) {
         alertaId.value = id
@@ -55,20 +66,52 @@ class AlertaDetalleViewModel(private val repo: CloroRepository) : ViewModel() {
         .flatMapLatest { repo.observarAcciones(it) }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
+    fun actualizarDescripcion(texto: String) {
+        val recortado = texto.take(ValidadorFormularios.MAX_CARACTERES_ACCION)
+        _descripcionAccion.value = recortado
+        _errorDescripcion.value = if (recortado.isEmpty()) null else ValidadorFormularios.validarAccionCorrectiva(recortado)
+    }
+
+    fun adjuntarFotoEvidencia(bitmap: Bitmap?) {
+        _fotoEvidencia.value = bitmap
+        if (bitmap != null) {
+            _mensaje.value = "Fotografía de respaldo adjuntada a la acción correctiva."
+        }
+    }
+
     fun consumirMensaje() {
         _mensaje.value = null
     }
 
-    fun registrarAccion(descripcion: String) {
+    fun registrarAccion(descripcion: String = _descripcionAccion.value) {
+        val error = ValidadorFormularios.validarAccionCorrectiva(descripcion)
+        if (error != null) {
+            _errorDescripcion.value = error
+            _mensaje.value = error
+            return
+        }
         viewModelScope.launch {
-            _mensaje.value = repo.registrarAccionCorrectiva(alertaId.value, descripcion)
-                ?: "Acción correctiva registrada."
+            val textoFinal = if (_fotoEvidencia.value != null) {
+                "${descripcion.trim()} [Evidencia fotográfica capturada]"
+            } else {
+                descripcion.trim()
+            }
+            val respuesta = repo.registrarAccionCorrectiva(alertaId.value, textoFinal)
+            if (respuesta == null) {
+                _descripcionAccion.value = ""
+                _errorDescripcion.value = null
+                _fotoEvidencia.value = null
+                _mensaje.value = "Acción correctiva registrada correctamente."
+            } else {
+                _errorDescripcion.value = respuesta
+                _mensaje.value = respuesta
+            }
         }
     }
 
     fun cerrarAlerta() {
         viewModelScope.launch {
-            _mensaje.value = repo.cerrarAlerta(alertaId.value) ?: "Alerta cerrada correctamente."
+            _mensaje.value = repo.cerrarAlerta(alertaId.value) ?: "Alerta validada y cerrada correctamente."
         }
     }
 }
