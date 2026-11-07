@@ -1,31 +1,68 @@
 package com.example.cloroapp.data
 
+import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
-import android.util.Base64
-import java.io.ByteArrayOutputStream
+import android.net.Uri
+import androidx.core.content.FileProvider
+import java.io.File
+import java.io.FileOutputStream
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 
 /**
- * Conversión de fotografías capturadas con la cámara nativa a formato Base64
- * para persistirlas directamente en las tablas SQLite de Room (NivelCloro y AccionCorrectiva).
+ * Gestión de archivos de imágenes y URIs seguros con FileProvider (IE 2.4.1).
+ * Guarda fotos físicas en el almacenamiento seguro de la app y devuelve la ruta/URI persistente
+ * para guardarla en Room (SQLite) sin perderse al cerrar la app o cambiar de pestaña.
  */
 object ImagenUtils {
 
-    fun bitmapABase64(bitmap: Bitmap): String {
-        val output = ByteArrayOutputStream()
-        bitmap.compress(Bitmap.CompressFormat.JPEG, 80, output)
-        val bytes = output.toByteArray()
-        return Base64.encodeToString(bytes, Base64.NO_WRAP)
+    /**
+     * Crea un archivo temporal físico y genera un Uri seguro a través de FileProvider para pasar a TakePicture.
+     */
+    fun crearUriFotoTemporal(context: Context): Pair<Uri, File> {
+        val dirFotos = File(context.filesDir, "fotos").apply { if (!exists()) mkdirs() }
+        val timeStamp = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.getDefault()).format(Date())
+        val archivo = File.createTempFile("FOTO_${timeStamp}_", ".jpg", dirFotos)
+        val uri = FileProvider.getUriForFile(
+            context,
+            "${context.packageName}.fileprovider",
+            archivo
+        )
+        return uri to archivo
     }
 
-    fun base64ABitmap(base64: String?): Bitmap? {
-        if (base64.isNullOrBlank()) return null
+    /**
+     * Carga un Bitmap redimensionado de forma segura desde un URI o ruta local sin sobrecargar la memoria.
+     */
+    fun cargarBitmapDesdeUri(context: Context, uri: Uri): Bitmap? {
         return try {
-            val bytes = Base64.decode(base64, Base64.DEFAULT)
-            BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
+            context.contentResolver.openInputStream(uri)?.use { input ->
+                val opciones = BitmapFactory.Options().apply {
+                    inSampleSize = 2 // escala ligera para preview fluido
+                }
+                BitmapFactory.decodeStream(input, null, opciones)
+            }
+        } catch (_: Exception) {
+            null
+        }
+    }
+
+    /**
+     * Carga un Bitmap desde la ruta absoluta de un archivo guardado.
+     */
+    fun cargarBitmapDesdeRuta(rutaArchivo: String?): Bitmap? {
+        if (rutaArchivo.isNullOrBlank()) return null
+        val archivo = File(rutaArchivo)
+        if (!archivo.exists()) return null
+        return try {
+            val opciones = BitmapFactory.Options().apply {
+                inSampleSize = 2
+            }
+            BitmapFactory.decodeFile(archivo.absolutePath, opciones)
         } catch (_: Exception) {
             null
         }
     }
 }
-

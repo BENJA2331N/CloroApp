@@ -184,8 +184,8 @@ fun PuntoDetalleScreen(
             }
 
             items(historial.take(40), key = { it.id }) { medicion ->
-                val bitmapGuardado = remember(medicion.fotoBase64) {
-                    ImagenUtils.base64ABitmap(medicion.fotoBase64)
+                val bitmapGuardado = remember(medicion.fotoRuta) {
+                    ImagenUtils.cargarBitmapDesdeRuta(medicion.fotoRuta)
                 }
                 Column(
                     modifier = Modifier

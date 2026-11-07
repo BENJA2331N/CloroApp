@@ -145,7 +145,7 @@ class CloroRepository(
         puntoId: Long,
         valor: Double,
         observacion: String? = null,
-        fotoBase64: String? = null
+        fotoRuta: String? = null
     ): NivelCloro {
         val usuario = _usuarioActual.value ?: throw IllegalStateException("No hay una sesión iniciada.")
         require(usuario.rol.puedeRegistrarMediciones) { "Tu perfil no permite registrar mediciones." }
@@ -169,7 +169,7 @@ class CloroRepository(
             origen = OrigenMedicion.MANUAL,
             sincronizado = false,
             observacion = observacion?.trim()?.takeIf { it.isNotEmpty() },
-            fotoBase64 = fotoBase64
+            fotoRuta = fotoRuta
         )
         val id = db.nivelCloroDao().insertar(nivel)
         if (id == -1L) throw IllegalStateException("Ya existe una medición registrada en ese instante. Inténtalo nuevamente.")
@@ -249,7 +249,7 @@ class CloroRepository(
     suspend fun registrarAccionCorrectiva(
         alertaId: Long,
         descripcion: String,
-        fotoBase64: String? = null
+        fotoRuta: String? = null
     ): String? {
         val usuario = _usuarioActual.value ?: return "No hay una sesión iniciada."
         if (!usuario.rol.puedeRegistrarMediciones) return "Tu perfil no permite registrar acciones correctivas."
@@ -268,7 +268,7 @@ class CloroRepository(
                 descripcion = texto,
                 responsable = usuario.nombre,
                 fechaHoraMillis = System.currentTimeMillis(),
-                fotoBase64 = fotoBase64
+                fotoRuta = fotoRuta
             )
         )
         if (alerta.estado == EstadoAlerta.ABIERTA) {

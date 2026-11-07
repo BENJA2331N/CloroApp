@@ -28,5 +28,5 @@ data class AccionCorrectiva(
     val responsable: String,
     val fechaHoraMillis: Long,
     val estadoResolucion: EstadoResolucion = EstadoResolucion.REGISTRADA,
-    val fotoBase64: String? = null
+    val fotoRuta: String? = null
 )

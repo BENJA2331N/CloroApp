@@ -1,6 +1,8 @@
 package com.example.cloroapp.ui.viewmodel
 
+import android.content.Context
 import android.graphics.Bitmap
+import android.net.Uri
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.cloroapp.data.CloroRepository
@@ -22,6 +24,7 @@ import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import java.io.File
 
 data class RegistroUiState(
     val puntos: List<PuntoResumen> = emptyList(),
@@ -30,7 +33,9 @@ data class RegistroUiState(
     val valor: Double? = 4.0,
     val errorValor: String? = null,
     val observacion: String = "",
-    val fotoEvidencia: Bitmap? = null,
+    val fotoUri: Uri? = null,
+    val fotoRuta: String? = null,
+    val fotoBitmap: Bitmap? = null,
     val clasificacion: ResultadoClasificacion? = null,
     val mensajeEstado: String = "",
     val rangos: RangosCloro = RangosCloro(),
@@ -40,14 +45,16 @@ data class RegistroUiState(
     val registroExitoso: Boolean = false
 )
 
-/** Registro manual de controles de cloro en terreno con persistencia de foto en Room (SQLite). */
+/** Registro manual de controles de cloro en terreno con persistencia segura de foto mediante FileProvider y Room. */
 class RegistroViewModel(private val repo: CloroRepository, prefs: PreferenciasRepository) : ViewModel() {
 
     private data class Local(
         val seleccionadoId: Long? = null,
         val valorTexto: String = Formato.decimal(4.0),
         val observacion: String = "",
-        val fotoEvidencia: Bitmap? = null,
+        val fotoUri: Uri? = null,
+        val fotoRuta: String? = null,
+        val fotoBitmap: Bitmap? = null,
         val guardando: Boolean = false,
         val mensaje: String? = null,
         val registroExitoso: Boolean = false
@@ -68,7 +75,9 @@ class RegistroViewModel(private val repo: CloroRepository, prefs: PreferenciasRe
             valor = valor,
             errorValor = errorCampo,
             observacion = estadoLocal.observacion,
-            fotoEvidencia = estadoLocal.fotoEvidencia,
+            fotoUri = estadoLocal.fotoUri,
+            fotoRuta = estadoLocal.fotoRuta,
+            fotoBitmap = estadoLocal.fotoBitmap,
             clasificacion = clasificacion,
             mensajeEstado = clasificacion?.let { ClasificadorCloro.mensaje(it, rangos) }
                 ?: (errorCampo ?: "Ingresa un valor entre 0,00 y 10,00 ppm"),
@@ -93,14 +102,34 @@ class RegistroViewModel(private val repo: CloroRepository, prefs: PreferenciasRe
         local.value = local.value.copy(observacion = texto.take(120))
     }
 
-    fun adjuntarFotoEvidencia(bitmap: Bitmap?) {
-        local.value = local.value.copy(
-            fotoEvidencia = bitmap,
-            mensaje = if (bitmap != null) "Fotografía capturada y lista para guardarse en la base de datos." else null
-        )
+    /** Prepara el archivo temporal y Uri antes de invocar TakePicture */
+    fun prepararCapturaFoto(context: Context): Uri {
+        val (uri, archivo) = ImagenUtils.crearUriFotoTemporal(context)
+        local.value = local.value.copy(fotoUri = uri, fotoRuta = archivo.absolutePath)
+        return uri
     }
 
-    /** Ajuste fino con los botones -0,1 / +0,1 (el valor siempre se mantiene entre 0 y 10 ppm). */
+    /** Se llama cuando TakePicture devuelve true */
+    fun confirmarFotoCapturada(context: Context) {
+        val uri = local.value.fotoUri ?: return
+        viewModelScope.launch {
+            val bitmap = withContext(Dispatchers.IO) {
+                ImagenUtils.cargarBitmapDesdeUri(context, uri)
+            }
+            local.value = local.value.copy(
+                fotoBitmap = bitmap,
+                mensaje = "Foto guardada exitosamente"
+            )
+        }
+    }
+
+    fun eliminarFoto() {
+        local.value.fotoRuta?.let { ruta ->
+            try { File(ruta).delete() } catch (_: Exception) {}
+        }
+        local.value = local.value.copy(fotoUri = null, fotoRuta = null, fotoBitmap = null)
+    }
+
     fun ajustar(delta: Double) {
         val actual = Formato.parsear(local.value.valorTexto) ?: 0.0
         val nuevo = (Math.round((actual + delta) * 100.0) / 100.0).coerceIn(0.0, 10.0)
@@ -131,20 +160,16 @@ class RegistroViewModel(private val repo: CloroRepository, prefs: PreferenciasRe
             local.value = local.value.copy(guardando = true)
             var exito = false
             val resultadoMensaje = try {
-                val fotoBase64 = estado.fotoEvidencia?.let { bmp ->
-                    withContext(Dispatchers.Default) { ImagenUtils.bitmapABase64(bmp) }
-                }
                 val nivel = repo.registrarMedicionManual(
                     puntoId = punto.puntoId,
                     valor = valor,
                     observacion = estado.observacion,
-                    fotoBase64 = fotoBase64
+                    fotoRuta = estado.fotoRuta
                 )
                 exito = true
                 val alerta = if (nivel.estado == EstadoCloro.NORMAL) "" else " Se generó/actualizó una alerta en Alertas."
-                val pendiente = if (nivel.sincronizado) "" else " (Guardado en base de datos local)."
-                val conFoto = if (fotoBase64 != null) " con foto guardada" else ""
-                "Medición registrada$conFoto: ${Formato.ppm(nivel.valorPpm)} (${nivel.estado.etiqueta}).$alerta$pendiente"
+                val conFoto = if (!estado.fotoRuta.isNullOrBlank()) " con foto guardada exitosamente." else "."
+                "Medición registrada: ${Formato.ppm(nivel.valorPpm)} (${nivel.estado.etiqueta})$conFoto$alerta"
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
@@ -154,7 +179,9 @@ class RegistroViewModel(private val repo: CloroRepository, prefs: PreferenciasRe
                 local.value.copy(
                     guardando = false,
                     observacion = "",
-                    fotoEvidencia = null,
+                    fotoUri = null,
+                    fotoRuta = null,
+                    fotoBitmap = null,
                     mensaje = resultadoMensaje,
                     registroExitoso = true
                 )

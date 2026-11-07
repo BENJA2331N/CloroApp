@@ -2,9 +2,9 @@ package com.example.cloroapp.ui.screen
 
 import android.Manifest
 import android.content.pm.PackageManager
+import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.activity.result.launch
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateColorAsState
@@ -48,7 +48,10 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -73,7 +76,7 @@ import com.example.cloroapp.ui.componentes.paleta
 import com.example.cloroapp.ui.viewmodel.RegistroViewModel
 import kotlinx.coroutines.launch
 
-/** Registro de un control de cloro en terreno, con validaciones visuales, animaciones y cámara nativa. */
+/** Registro de un control de cloro en terreno, con TakePicture + FileProvider y Room. */
 @Composable
 fun RegistrarScreen(
     puntoIdInicial: Long,
@@ -85,18 +88,24 @@ fun RegistrarScreen(
     val contexto = LocalContext.current
     val scope = rememberCoroutineScope()
 
-    // Recurso nativo: Cámara del dispositivo con verificación segura de permiso CAMERA
-    val lanzadorCamara = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.TakePicturePreview()
-    ) { bitmap ->
-        if (bitmap != null) vm.adjuntarFotoEvidencia(bitmap)
+    var uriDestinoCamara by remember { mutableStateOf<Uri?>(null) }
+
+    // Recurso nativo robusto: ActivityResultContracts.TakePicture con FileProvider
+    val lanzadorTakePicture = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.TakePicture()
+    ) { exito ->
+        if (exito) {
+            vm.confirmarFotoCapturada(contexto)
+        }
     }
 
     val lanzadorPermisoCamara = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.RequestPermission()
     ) { concedido ->
         if (concedido) {
-            lanzadorCamara.launch()
+            val uri = vm.prepararCapturaFoto(contexto)
+            uriDestinoCamara = uri
+            lanzadorTakePicture.launch(uri)
         } else {
             scope.launch {
                 snackbar.showSnackbar("Permiso de cámara denegado. Puedes registrar la medición sin foto.")
@@ -267,7 +276,7 @@ fun RegistrarScreen(
             modifier = Modifier.fillMaxWidth()
         )
 
-        // Recurso nativo: Captura fotográfica del fotómetro en terreno
+        // Botón de cámara con FileProvider y TakePicture
         OutlinedButton(
             onClick = {
                 val tienePermiso = ContextCompat.checkSelfPermission(
@@ -275,7 +284,9 @@ fun RegistrarScreen(
                     Manifest.permission.CAMERA
                 ) == PackageManager.PERMISSION_GRANTED
                 if (tienePermiso) {
-                    lanzadorCamara.launch()
+                    val uri = vm.prepararCapturaFoto(contexto)
+                    uriDestinoCamara = uri
+                    lanzadorTakePicture.launch(uri)
                 } else {
                     lanzadorPermisoCamara.launch(Manifest.permission.CAMERA)
                 }
@@ -285,17 +296,17 @@ fun RegistrarScreen(
         ) {
             Icon(Icons.Filled.Add, contentDescription = null)
             Text(
-                text = if (estado.fotoEvidencia == null) "  Capturar foto del fotómetro (Cámara)"
+                text = if (estado.fotoBitmap == null) "  Tomar foto del fotómetro (Cámara)"
                 else "  Volver a tomar fotografía"
             )
         }
 
         AnimatedVisibility(
-            visible = estado.fotoEvidencia != null,
+            visible = estado.fotoBitmap != null,
             enter = fadeIn(),
             exit = fadeOut()
         ) {
-            estado.fotoEvidencia?.let { bitmap ->
+            estado.fotoBitmap?.let { bitmap ->
                 Card(
                     modifier = Modifier.fillMaxWidth(),
                     shape = RoundedCornerShape(12.dp),
@@ -312,12 +323,12 @@ fun RegistrarScreen(
                             verticalAlignment = Alignment.CenterVertically
                         ) {
                             Text(
-                                text = "Evidencia fotográfica capturada",
+                                text = "Foto capturada (se guardará con el control)",
                                 style = MaterialTheme.typography.labelLarge,
                                 fontWeight = FontWeight.Bold
                             )
-                            IconButton(onClick = { vm.adjuntarFotoEvidencia(null) }) {
-                                Icon(Icons.Filled.Delete, contentDescription = "Quitar foto")
+                            IconButton(onClick = vm::eliminarFoto) {
+                                Icon(Icons.Filled.Delete, contentDescription = "Eliminar foto")
                             }
                         }
                         Image(

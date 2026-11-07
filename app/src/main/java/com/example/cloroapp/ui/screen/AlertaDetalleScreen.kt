@@ -2,9 +2,9 @@ package com.example.cloroapp.ui.screen
 
 import android.Manifest
 import android.content.pm.PackageManager
+import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.activity.result.launch
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateContentSize
 import androidx.compose.animation.fadeIn
@@ -44,8 +44,10 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -89,21 +91,27 @@ fun AlertaDetalleScreen(
     val mensaje by vm.mensaje.collectAsStateWithLifecycle()
     val descripcion by vm.descripcionAccion.collectAsStateWithLifecycle()
     val errorDescripcion by vm.errorDescripcion.collectAsStateWithLifecycle()
-    val fotoEvidencia by vm.fotoEvidencia.collectAsStateWithLifecycle()
+    val fotoBitmap by vm.fotoBitmap.collectAsStateWithLifecycle()
     val contexto = LocalContext.current
     val scope = rememberCoroutineScope()
 
-    val lanzadorCamara = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.TakePicturePreview()
-    ) { bitmap ->
-        if (bitmap != null) vm.adjuntarFotoEvidencia(bitmap)
+    var uriDestinoCamara by remember { mutableStateOf<Uri?>(null) }
+
+    val lanzadorTakePicture = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.TakePicture()
+    ) { exito ->
+        if (exito) {
+            vm.confirmarFotoCapturada(contexto)
+        }
     }
 
     val lanzadorPermisoCamara = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.RequestPermission()
     ) { concedido ->
         if (concedido) {
-            lanzadorCamara.launch()
+            val uri = vm.prepararCapturaFoto(contexto)
+            uriDestinoCamara = uri
+            lanzadorTakePicture.launch(uri)
         } else {
             scope.launch { snackbar.showSnackbar("Permiso de cámara no concedido.") }
         }
@@ -209,7 +217,7 @@ fun AlertaDetalleScreen(
                 }
             }
 
-            // Muestra en vivo la última medición del punto para que el usuario vea el resultado de la verificación
+            // Muestra en vivo la última medición del punto para verificar el retorno a la normalidad
             puntoActual?.let { pActual ->
                 val estadoPunto = pActual.estado
                 if (estadoPunto != null && pActual.valorPpm != null) {
@@ -316,24 +324,29 @@ fun AlertaDetalleScreen(
                                     contexto,
                                     Manifest.permission.CAMERA
                                 ) == PackageManager.PERMISSION_GRANTED
-                                if (tienePermiso) lanzadorCamara.launch()
-                                else lanzadorPermisoCamara.launch(Manifest.permission.CAMERA)
+                                if (tienePermiso) {
+                                    val uri = vm.prepararCapturaFoto(contexto)
+                                    uriDestinoCamara = uri
+                                    lanzadorTakePicture.launch(uri)
+                                } else {
+                                    lanzadorPermisoCamara.launch(Manifest.permission.CAMERA)
+                                }
                             },
                             modifier = Modifier.fillMaxWidth()
                         ) {
                             Icon(Icons.Filled.Add, contentDescription = null)
                             Text(
-                                if (fotoEvidencia == null) "  Adjuntar fotografía de respaldo (Cámara)"
-                                else "  Cambiar fotografía de respaldo"
+                                if (fotoBitmap == null) "  Tomar foto de respaldo con cámara"
+                                else "  Volver a tomar fotografía"
                             )
                         }
 
                         AnimatedVisibility(
-                            visible = fotoEvidencia != null,
+                            visible = fotoBitmap != null,
                             enter = fadeIn(),
                             exit = fadeOut()
                         ) {
-                            fotoEvidencia?.let { bmp ->
+                            fotoBitmap?.let { bmp ->
                                 Card(
                                     modifier = Modifier.fillMaxWidth(),
                                     colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
@@ -344,9 +357,9 @@ fun AlertaDetalleScreen(
                                             horizontalArrangement = Arrangement.SpaceBetween,
                                             verticalAlignment = Alignment.CenterVertically
                                         ) {
-                                            Text("Vista previa de foto por guardar", style = MaterialTheme.typography.labelMedium)
-                                            IconButton(onClick = { vm.adjuntarFotoEvidencia(null) }) {
-                                                Icon(Icons.Filled.Delete, contentDescription = "Quitar evidencia")
+                                            Text("Foto capturada (se guardará con la acción)", style = MaterialTheme.typography.labelMedium)
+                                            IconButton(onClick = vm::eliminarFoto) {
+                                                Icon(Icons.Filled.Delete, contentDescription = "Eliminar foto")
                                             }
                                         }
                                         Image(
@@ -411,8 +424,8 @@ fun AlertaDetalleScreen(
             }
 
             items(acciones, key = { it.id }) { accion ->
-                val bitmapGuardado = remember(accion.fotoBase64) {
-                    ImagenUtils.base64ABitmap(accion.fotoBase64)
+                val bitmapGuardado = remember(accion.fotoRuta) {
+                    ImagenUtils.cargarBitmapDesdeRuta(accion.fotoRuta)
                 }
                 Card(
                     modifier = Modifier.fillMaxWidth(),
@@ -429,7 +442,7 @@ fun AlertaDetalleScreen(
                         if (bitmapGuardado != null) {
                             Spacer(modifier = Modifier.height(4.dp))
                             Text(
-                                text = "Fotografía guardada en base de datos:",
+                                text = "Fotografía guardada:",
                                 style = MaterialTheme.typography.labelSmall,
                                 fontWeight = FontWeight.SemiBold,
                                 color = MaterialTheme.colorScheme.primary

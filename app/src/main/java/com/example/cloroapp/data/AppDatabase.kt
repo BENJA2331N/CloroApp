@@ -15,8 +15,8 @@ import androidx.room.RoomDatabase
         Alerta::class,
         AccionCorrectiva::class
     ],
-    // Versión 3: agrega columnas de evidencia fotográfica (fotoBase64) y observación en SQLite.
-    version = 3,
+    // Versión 4: rutas de archivos de fotos (fotoRuta) en SQLite para persistencia nativa con FileProvider.
+    version = 4,
     exportSchema = false
 )
 abstract class AppDatabase : RoomDatabase() {
