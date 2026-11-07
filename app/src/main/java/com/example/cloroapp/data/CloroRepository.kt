@@ -137,10 +137,16 @@ class CloroRepository(
     // ---------------------------------------------------------------- Registro de mediciones
 
     /**
-     * Registra un control manual. Queda guardado localmente aunque no haya conexión y se envía
-     * a la API cuando es posible (respuesta 12). Si la medición está fuera de rango se genera una alerta.
+     * Registra un control manual junto con su observación y fotografía en Base64 dentro de Room (SQLite).
+     * Queda guardado localmente aunque no haya conexión y se envía a la API cuando es posible (respuesta 12).
+     * Si la medición está fuera de rango se genera una alerta.
      */
-    suspend fun registrarMedicionManual(puntoId: Long, valor: Double): NivelCloro {
+    suspend fun registrarMedicionManual(
+        puntoId: Long,
+        valor: Double,
+        observacion: String? = null,
+        fotoBase64: String? = null
+    ): NivelCloro {
         val usuario = _usuarioActual.value ?: throw IllegalStateException("No hay una sesión iniciada.")
         require(usuario.rol.puedeRegistrarMediciones) { "Tu perfil no permite registrar mediciones." }
         require(valor in 0.0..10.0) { "El valor debe estar entre 0,00 y 10,00 ppm." }
@@ -161,7 +167,9 @@ class CloroRepository(
             estado = clasificacion.estado,
             registradoPor = usuario.nombre,
             origen = OrigenMedicion.MANUAL,
-            sincronizado = false
+            sincronizado = false,
+            observacion = observacion?.trim()?.takeIf { it.isNotEmpty() },
+            fotoBase64 = fotoBase64
         )
         val id = db.nivelCloroDao().insertar(nivel)
         if (id == -1L) throw IllegalStateException("Ya existe una medición registrada en ese instante. Inténtalo nuevamente.")
@@ -237,8 +245,12 @@ class CloroRepository(
         )
     }
 
-    /** Devuelve un mensaje de error, o null si la acción quedó registrada. */
-    suspend fun registrarAccionCorrectiva(alertaId: Long, descripcion: String): String? {
+    /** Devuelve un mensaje de error, o null si la acción y su fotografía quedaron registradas en SQLite. */
+    suspend fun registrarAccionCorrectiva(
+        alertaId: Long,
+        descripcion: String,
+        fotoBase64: String? = null
+    ): String? {
         val usuario = _usuarioActual.value ?: return "No hay una sesión iniciada."
         if (!usuario.rol.puedeRegistrarMediciones) return "Tu perfil no permite registrar acciones correctivas."
         val errorValidacion = com.example.cloroapp.domain.ValidadorFormularios.validarAccionCorrectiva(descripcion)
@@ -255,7 +267,8 @@ class CloroRepository(
                 nivelCloroId = alerta.nivelCloroId,
                 descripcion = texto,
                 responsable = usuario.nombre,
-                fechaHoraMillis = System.currentTimeMillis()
+                fechaHoraMillis = System.currentTimeMillis(),
+                fotoBase64 = fotoBase64
             )
         )
         if (alerta.estado == EstadoAlerta.ABIERTA) {

@@ -15,8 +15,8 @@ import androidx.room.RoomDatabase
         Alerta::class,
         AccionCorrectiva::class
     ],
-    // Versión 2: el esquema cambió respecto a la v1 de la primera entrega (ids Long, enums, nuevas tablas).
-    version = 2,
+    // Versión 3: agrega columnas de evidencia fotográfica (fotoBase64) y observación en SQLite.
+    version = 3,
     exportSchema = false
 )
 abstract class AppDatabase : RoomDatabase() {

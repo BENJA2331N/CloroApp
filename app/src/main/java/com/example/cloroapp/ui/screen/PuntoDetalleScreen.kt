@@ -1,11 +1,13 @@
 package com.example.cloroapp.ui.screen
 
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -23,10 +25,14 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
+import com.example.cloroapp.data.ImagenUtils
 import com.example.cloroapp.data.Usuario
 import com.example.cloroapp.domain.ClasificadorCloro
 import com.example.cloroapp.domain.EstadoCloro
@@ -178,35 +184,64 @@ fun PuntoDetalleScreen(
             }
 
             items(historial.take(40), key = { it.id }) { medicion ->
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
+                val bitmapGuardado = remember(medicion.fotoBase64) {
+                    ImagenUtils.base64ABitmap(medicion.fotoBase64)
+                }
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(vertical = 4.dp),
+                    verticalArrangement = Arrangement.spacedBy(4.dp)
                 ) {
-                    Column(modifier = Modifier.weight(1f)) {
-                        Text(
-                            text = Formato.fechaHora(medicion.fechaHoraMillis),
-                            style = MaterialTheme.typography.bodyMedium
-                        )
-                        val origen = if (medicion.origen == OrigenMedicion.MANUAL) {
-                            "${medicion.registradoPor}" + if (medicion.sincronizado) "" else " · pendiente de sincronizar"
-                        } else {
-                            medicion.origen.etiqueta
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = Formato.fechaHora(medicion.fechaHoraMillis),
+                                style = MaterialTheme.typography.bodyMedium
+                            )
+                            val origen = if (medicion.origen == OrigenMedicion.MANUAL) {
+                                "${medicion.registradoPor}" + if (medicion.sincronizado) "" else " · pendiente de sincronizar"
+                            } else {
+                                medicion.origen.etiqueta
+                            }
+                            Text(
+                                text = origen,
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                            medicion.observacion?.let { nota ->
+                                Text(
+                                    text = "Nota: $nota",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    fontWeight = FontWeight.Medium,
+                                    color = MaterialTheme.colorScheme.primary
+                                )
+                            }
                         }
                         Text(
-                            text = origen,
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                            text = Formato.ppm(medicion.valorPpm),
+                            style = MaterialTheme.typography.titleSmall,
+                            fontWeight = FontWeight.Bold,
+                            color = medicion.estado.paleta().texto,
+                            modifier = Modifier.padding(end = 8.dp)
+                        )
+                        EtiquetaEstado(medicion.estado)
+                    }
+                    if (bitmapGuardado != null) {
+                        Image(
+                            bitmap = bitmapGuardado.asImageBitmap(),
+                            contentDescription = "Fotografía del fotómetro guardada en SQLite",
+                            contentScale = ContentScale.Crop,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(130.dp)
+                                .clip(RoundedCornerShape(8.dp))
                         )
                     }
-                    Text(
-                        text = Formato.ppm(medicion.valorPpm),
-                        style = MaterialTheme.typography.titleSmall,
-                        fontWeight = FontWeight.Bold,
-                        color = medicion.estado.paleta().texto,
-                        modifier = Modifier.padding(end = 8.dp)
-                    )
-                    EtiquetaEstado(medicion.estado)
                 }
                 HorizontalDivider()
             }

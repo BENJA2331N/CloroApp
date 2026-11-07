@@ -129,10 +129,12 @@ private fun ContenidoPrincipal(usuario: Usuario, sesionVm: SesionViewModel) {
                         NavigationBarItem(
                             selected = rutaActual == pestana.ruta,
                             onClick = {
-                                navController.navigate(pestana.ruta) {
-                                    popUpTo(inicio) { saveState = true }
-                                    launchSingleTop = true
-                                    restoreState = true
+                                val volvioAPestana = navController.popBackStack(pestana.ruta, inclusive = false)
+                                if (!volvioAPestana) {
+                                    navController.navigate(pestana.ruta) {
+                                        popUpTo(inicio) { inclusive = false }
+                                        launchSingleTop = true
+                                    }
                                 }
                             },
                             icon = {
@@ -187,9 +189,11 @@ private fun ContenidoPrincipal(usuario: Usuario, sesionVm: SesionViewModel) {
                     }
                 )
             ) { entrada ->
+                val puntoIdArg = entrada.arguments?.getLong("puntoId") ?: -1L
                 RegistrarScreen(
-                    puntoIdInicial = entrada.arguments?.getLong("puntoId") ?: -1L,
-                    snackbar = snackbar
+                    puntoIdInicial = puntoIdArg,
+                    snackbar = snackbar,
+                    onVolver = if (puntoIdArg > 0L) ({ navController.popBackStack() }) else null
                 )
             }
             composable("alertas") {

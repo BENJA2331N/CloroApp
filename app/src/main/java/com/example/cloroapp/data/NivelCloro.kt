@@ -35,5 +35,7 @@ data class NivelCloro(
     val estado: EstadoCloro,
     val registradoPor: String,
     val origen: OrigenMedicion = OrigenMedicion.MANUAL,
-    val sincronizado: Boolean = false
+    val sincronizado: Boolean = false,
+    val observacion: String? = null,
+    val fotoBase64: String? = null
 )

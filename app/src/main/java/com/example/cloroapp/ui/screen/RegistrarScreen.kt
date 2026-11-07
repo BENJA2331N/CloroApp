@@ -67,6 +67,7 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import com.example.cloroapp.domain.EstadoCloro
 import com.example.cloroapp.domain.Formato
 import com.example.cloroapp.ui.AppViewModelProvider
+import com.example.cloroapp.ui.componentes.EncabezadoDetalle
 import com.example.cloroapp.ui.componentes.SelectorDesplegable
 import com.example.cloroapp.ui.componentes.paleta
 import com.example.cloroapp.ui.viewmodel.RegistroViewModel
@@ -77,6 +78,7 @@ import kotlinx.coroutines.launch
 fun RegistrarScreen(
     puntoIdInicial: Long,
     snackbar: SnackbarHostState,
+    onVolver: (() -> Unit)? = null,
     vm: RegistroViewModel = viewModel(factory = AppViewModelProvider.Factory)
 ) {
     val estado by vm.uiState.collectAsStateWithLifecycle()
@@ -107,8 +109,14 @@ fun RegistrarScreen(
     }
     LaunchedEffect(estado.mensaje) {
         estado.mensaje?.let {
-            snackbar.showSnackbar(it)
+            scope.launch { snackbar.showSnackbar(it) }
             vm.consumirMensaje()
+        }
+    }
+    LaunchedEffect(estado.registroExitoso) {
+        if (estado.registroExitoso) {
+            vm.consumirRegistroExitoso()
+            onVolver?.invoke()
         }
     }
 
@@ -134,13 +142,17 @@ fun RegistrarScreen(
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.spacedBy(16.dp)
     ) {
-        Text(
-            text = "Registrar control de cloro",
-            style = MaterialTheme.typography.headlineMedium,
-            fontWeight = FontWeight.Bold,
-            color = MaterialTheme.colorScheme.primary,
-            textAlign = TextAlign.Center
-        )
+        if (onVolver != null) {
+            EncabezadoDetalle(titulo = "Medición de verificación", onVolver = onVolver)
+        } else {
+            Text(
+                text = "Registrar control de cloro",
+                style = MaterialTheme.typography.headlineMedium,
+                fontWeight = FontWeight.Bold,
+                color = MaterialTheme.colorScheme.primary,
+                textAlign = TextAlign.Center
+            )
+        }
 
         SelectorDesplegable(
             etiqueta = "Selecciona un punto de medición",

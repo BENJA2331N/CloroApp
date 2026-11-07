@@ -4,6 +4,7 @@ import android.graphics.Bitmap
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.cloroapp.data.CloroRepository
+import com.example.cloroapp.data.ImagenUtils
 import com.example.cloroapp.data.PreferenciasRepository
 import com.example.cloroapp.data.PuntoResumen
 import com.example.cloroapp.domain.ClasificadorCloro
@@ -13,12 +14,14 @@ import com.example.cloroapp.domain.RangosCloro
 import com.example.cloroapp.domain.ResultadoClasificacion
 import com.example.cloroapp.domain.ValidadorFormularios
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 data class RegistroUiState(
     val puntos: List<PuntoResumen> = emptyList(),
@@ -33,10 +36,11 @@ data class RegistroUiState(
     val rangos: RangosCloro = RangosCloro(),
     val controlesHoy: Int = 0,
     val guardando: Boolean = false,
-    val mensaje: String? = null
+    val mensaje: String? = null,
+    val registroExitoso: Boolean = false
 )
 
-/** Registro manual de controles de cloro en terreno con validación centralizada y evidencia fotográfica nativa. */
+/** Registro manual de controles de cloro en terreno con persistencia de foto en Room (SQLite). */
 class RegistroViewModel(private val repo: CloroRepository, prefs: PreferenciasRepository) : ViewModel() {
 
     private data class Local(
@@ -45,7 +49,8 @@ class RegistroViewModel(private val repo: CloroRepository, prefs: PreferenciasRe
         val observacion: String = "",
         val fotoEvidencia: Bitmap? = null,
         val guardando: Boolean = false,
-        val mensaje: String? = null
+        val mensaje: String? = null,
+        val registroExitoso: Boolean = false
     )
 
     private val local = MutableStateFlow(Local())
@@ -70,7 +75,8 @@ class RegistroViewModel(private val repo: CloroRepository, prefs: PreferenciasRe
             rangos = rangos,
             controlesHoy = controles,
             guardando = estadoLocal.guardando,
-            mensaje = estadoLocal.mensaje
+            mensaje = estadoLocal.mensaje,
+            registroExitoso = estadoLocal.registroExitoso
         )
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), RegistroUiState())
 
@@ -90,7 +96,7 @@ class RegistroViewModel(private val repo: CloroRepository, prefs: PreferenciasRe
     fun adjuntarFotoEvidencia(bitmap: Bitmap?) {
         local.value = local.value.copy(
             fotoEvidencia = bitmap,
-            mensaje = if (bitmap != null) "Fotografía del fotómetro adjuntada correctamente." else null
+            mensaje = if (bitmap != null) "Fotografía capturada y lista para guardarse en la base de datos." else null
         )
     }
 
@@ -103,6 +109,10 @@ class RegistroViewModel(private val repo: CloroRepository, prefs: PreferenciasRe
 
     fun consumirMensaje() {
         local.value = local.value.copy(mensaje = null)
+    }
+
+    fun consumirRegistroExitoso() {
+        local.value = local.value.copy(registroExitoso = false)
     }
 
     fun registrar() {
@@ -119,23 +129,41 @@ class RegistroViewModel(private val repo: CloroRepository, prefs: PreferenciasRe
         }
         viewModelScope.launch {
             local.value = local.value.copy(guardando = true)
+            var exito = false
             val resultadoMensaje = try {
-                val nivel = repo.registrarMedicionManual(punto.puntoId, valor)
-                val alerta = if (nivel.estado == EstadoCloro.NORMAL) "" else " Revisa la sección Alertas."
-                val pendiente = if (nivel.sincronizado) "" else " Pendiente de sincronización."
-                val conFoto = if (estado.fotoEvidencia != null) " (con evidencia fotográfica)" else ""
+                val fotoBase64 = estado.fotoEvidencia?.let { bmp ->
+                    withContext(Dispatchers.Default) { ImagenUtils.bitmapABase64(bmp) }
+                }
+                val nivel = repo.registrarMedicionManual(
+                    puntoId = punto.puntoId,
+                    valor = valor,
+                    observacion = estado.observacion,
+                    fotoBase64 = fotoBase64
+                )
+                exito = true
+                val alerta = if (nivel.estado == EstadoCloro.NORMAL) "" else " Se generó/actualizó una alerta en Alertas."
+                val pendiente = if (nivel.sincronizado) "" else " (Guardado en base de datos local)."
+                val conFoto = if (fotoBase64 != null) " con foto guardada" else ""
                 "Medición registrada$conFoto: ${Formato.ppm(nivel.valorPpm)} (${nivel.estado.etiqueta}).$alerta$pendiente"
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
                 e.message ?: "No se pudo registrar la medición."
             }
-            local.value = local.value.copy(
-                guardando = false,
-                observacion = "",
-                fotoEvidencia = null,
-                mensaje = resultadoMensaje
-            )
+            local.value = if (exito) {
+                local.value.copy(
+                    guardando = false,
+                    observacion = "",
+                    fotoEvidencia = null,
+                    mensaje = resultadoMensaje,
+                    registroExitoso = true
+                )
+            } else {
+                local.value.copy(
+                    guardando = false,
+                    mensaje = resultadoMensaje
+                )
+            }
         }
     }
 }

@@ -11,9 +11,11 @@ import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -42,6 +44,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -54,8 +57,10 @@ import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
+import com.example.cloroapp.data.ImagenUtils
 import com.example.cloroapp.data.Usuario
 import com.example.cloroapp.domain.EstadoAlerta
+import com.example.cloroapp.domain.EstadoCloro
 import com.example.cloroapp.domain.Formato
 import com.example.cloroapp.domain.TipoDesviacion
 import com.example.cloroapp.domain.ValidadorFormularios
@@ -79,6 +84,7 @@ fun AlertaDetalleScreen(
     LaunchedEffect(alertaId) { vm.seleccionar(alertaId) }
 
     val detalle by vm.alerta.collectAsStateWithLifecycle()
+    val puntoActual by vm.puntoActual.collectAsStateWithLifecycle()
     val acciones by vm.acciones.collectAsStateWithLifecycle()
     val mensaje by vm.mensaje.collectAsStateWithLifecycle()
     val descripcion by vm.descripcionAccion.collectAsStateWithLifecycle()
@@ -105,7 +111,7 @@ fun AlertaDetalleScreen(
 
     LaunchedEffect(mensaje) {
         mensaje?.let {
-            snackbar.showSnackbar(it)
+            scope.launch { snackbar.showSnackbar(it) }
             vm.consumirMensaje()
         }
     }
@@ -184,7 +190,7 @@ fun AlertaDetalleScreen(
                             color = paleta.texto
                         )
                         Text(
-                            text = "Medición: ${Formato.ppm(alerta.valorPpm)} el ${Formato.fechaHora(alerta.fechaHoraMillis)}",
+                            text = "Medición que originó la alerta: ${Formato.ppm(alerta.valorPpm)} el ${Formato.fechaHora(alerta.fechaHoraMillis)}",
                             style = MaterialTheme.typography.bodyMedium,
                             color = paleta.texto
                         )
@@ -199,6 +205,53 @@ fun AlertaDetalleScreen(
                             fontWeight = FontWeight.Medium,
                             color = paleta.texto
                         )
+                    }
+                }
+            }
+
+            // Muestra en vivo la última medición del punto para que el usuario vea el resultado de la verificación
+            puntoActual?.let { pActual ->
+                val estadoPunto = pActual.estado
+                if (estadoPunto != null && pActual.valorPpm != null) {
+                    item {
+                        val paletaPunto = estadoPunto.paleta()
+                        Card(
+                            modifier = Modifier.fillMaxWidth(),
+                            shape = RoundedCornerShape(14.dp),
+                            colors = CardDefaults.cardColors(containerColor = paletaPunto.fondo)
+                        ) {
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(14.dp),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Text(
+                                        text = "Última medición en el punto (${pActual.codigo})",
+                                        style = MaterialTheme.typography.labelLarge,
+                                        fontWeight = FontWeight.Bold,
+                                        color = paletaPunto.texto
+                                    )
+                                    Text(
+                                        text = "${Formato.ppm(pActual.valorPpm)} · " +
+                                            (pActual.fechaHoraMillis?.let { Formato.fechaHora(it) } ?: ""),
+                                        style = MaterialTheme.typography.bodyMedium,
+                                        color = paletaPunto.texto
+                                    )
+                                    if (!cerrada && estadoPunto == EstadoCloro.NORMAL && acciones.isNotEmpty()) {
+                                        Text(
+                                            text = "Verificación dentro de rango normal. Lista para validar y cerrar.",
+                                            style = MaterialTheme.typography.bodySmall,
+                                            fontWeight = FontWeight.SemiBold,
+                                            color = paletaPunto.texto
+                                        )
+                                    }
+                                }
+                                EtiquetaEstado(estadoPunto)
+                            }
+                        }
                     }
                 }
             }
@@ -291,7 +344,7 @@ fun AlertaDetalleScreen(
                                             horizontalArrangement = Arrangement.SpaceBetween,
                                             verticalAlignment = Alignment.CenterVertically
                                         ) {
-                                            Text("Evidencia adjunta", style = MaterialTheme.typography.labelMedium)
+                                            Text("Vista previa de foto por guardar", style = MaterialTheme.typography.labelMedium)
                                             IconButton(onClick = { vm.adjuntarFotoEvidencia(null) }) {
                                                 Icon(Icons.Filled.Delete, contentDescription = "Quitar evidencia")
                                             }
@@ -358,11 +411,14 @@ fun AlertaDetalleScreen(
             }
 
             items(acciones, key = { it.id }) { accion ->
+                val bitmapGuardado = remember(accion.fotoBase64) {
+                    ImagenUtils.base64ABitmap(accion.fotoBase64)
+                }
                 Card(
                     modifier = Modifier.fillMaxWidth(),
                     colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
                 ) {
-                    Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                    Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                         Text(text = accion.descripcion, style = MaterialTheme.typography.bodyMedium)
                         Text(
                             text = "${accion.responsable} · ${Formato.fechaHora(accion.fechaHoraMillis)} · " +
@@ -370,16 +426,29 @@ fun AlertaDetalleScreen(
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
+                        if (bitmapGuardado != null) {
+                            Spacer(modifier = Modifier.height(4.dp))
+                            Text(
+                                text = "Fotografía guardada en base de datos:",
+                                style = MaterialTheme.typography.labelSmall,
+                                fontWeight = FontWeight.SemiBold,
+                                color = MaterialTheme.colorScheme.primary
+                            )
+                            Image(
+                                bitmap = bitmapGuardado.asImageBitmap(),
+                                contentDescription = "Fotografía guardada de acción correctiva",
+                                contentScale = ContentScale.Crop,
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .height(150.dp)
+                                    .clip(RoundedCornerShape(8.dp))
+                            )
+                        }
                     }
                 }
             }
         }
     }
-}
-
-@Composable
-private fun Box(modifier: Modifier = Modifier, content: @Composable () -> Unit) {
-    androidx.compose.foundation.layout.Box(modifier = modifier) { content() }
 }
 
 /** Las acciones correctivas difieren según el tipo de desviación (respuesta 5). */
