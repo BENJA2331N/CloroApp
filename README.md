@@ -35,6 +35,13 @@ Hay 15 usuarios: `operario1..9`, `supervisor1..4`, `jefatura1..2`.
 - Alertas (respuestas 19–26): se generan al detectar una medición fuera de rango, distinguiendo cloro
   insuficiente de excesivo. El cierre exige una acción correctiva y una nueva medición normal, validado por supervisor.
 
+## Recursos nativos integrados (IE 2.4.1)
+
+- **Cámara nativa con FileProvider:** Captura de evidencia fotográfica del fotómetro en mediciones y respaldo de acciones correctivas mediante `ActivityResultContracts.TakePicture()` y `androidx.core.content.FileProvider`. Las fotos se guardan en el almacenamiento interno de la app y sus rutas persisten en SQLite con Room.
+- **Notificaciones del sistema:** Canal de alta prioridad para avisos de niveles de cloro fuera de rango con solicitud en tiempo de ejecución de `POST_NOTIFICATIONS` (Android 13+).
+- **Vibración háptica:** Patrón de alerta (`Vibrator` / `VibratorManager`) ante mediciones críticas y pulso corto de confirmación al registrar.
+- **Compartir reportes:** Integración de `Intent.ACTION_SEND` (Android Sharesheet) para exportar reportes ejecutivos y fichas de alerta a otras aplicaciones.
+
 ## Estructura
 
 ```
